@@ -1,10 +1,17 @@
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/rendering.dart';
 import 'package:pdf_image_renderer/pdf_image_renderer.dart';
 import 'package:get/get.dart';
-import 'position_controller.dart';
 import 'image_controller.dart';
-import 'package:matrix_gesture_detector/matrix_gesture_detector.dart';
+import 'overlayedWidget.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'dart:ui' as ui;
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:flutter/services.dart';
 
 class OpenDocument extends StatefulWidget {
   const OpenDocument({
@@ -16,9 +23,10 @@ class OpenDocument extends StatefulWidget {
 }
 
 class _OpenDocumentState extends State<OpenDocument> {
-  var image;
+  var pdfImage;
   bool pdfIsPicked = false;
   bool signatureIsAdded = false;
+  final imageController = Get.put(ImageController());
 
   void rendererPdfImage(PlatformFile file) async {
     String path = file.path!;
@@ -42,10 +50,12 @@ class _OpenDocumentState extends State<OpenDocument> {
     pdf.close();
 
     setState(() {
-      image = img;
+      pdfImage = img;
       pdfIsPicked = true;
     });
   }
+
+  final GlobalKey globalKey = GlobalKey();
 
   @override
   Widget build(BuildContext context) {
@@ -57,14 +67,25 @@ class _OpenDocumentState extends State<OpenDocument> {
             Expanded(
               child: Center(
                 child: pdfIsPicked
-                    ? Stack(
-                        children: [
-                          Image(
-                            image: MemoryImage(image),
+                    ? Padding(
+                      padding: const EdgeInsets.only(top: 150.0),
+                      child: RepaintBoundary(
+                        key: globalKey,
+                        child: Stack(
+                            children: [
+                              Image(
+                                image: MemoryImage(pdfImage),
+                              ),
+                              if (signatureIsAdded)
+                                OverlayedWidget(
+                                  child: Container(
+                                    child: imageController.image,
+                                  ),
+                                ),
+                            ],
                           ),
-                          if (signatureIsAdded) SignaturePosition(),
-                        ],
-                      )
+                      ),
+                    )
                     : IconButton(
                         onPressed: () async {
                           final FilePickerResult? result =
@@ -81,26 +102,28 @@ class _OpenDocumentState extends State<OpenDocument> {
                       ),
               ),
             ),
-            if(pdfIsPicked) Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Row(
-                children: [
-                  if(!signatureIsAdded) ElevatedButton(
-                    onPressed: () {
-                      setState(() {
-                        signatureIsAdded = true;
-                      });
-                    },
-                    child: const Text('insert signature'),
-                  ),
-                  IconButton(
-                    onPressed: () {},
-                    icon: const Icon(Icons.share),
-                    color: Colors.green,
-                  ),
-                ],
+            if (pdfIsPicked)
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Row(
+                  children: [
+                    if (!signatureIsAdded)
+                      ElevatedButton(
+                        onPressed: () {
+                          setState(() {
+                            signatureIsAdded = true;
+                          });
+                        },
+                        child: const Text('insert signature'),
+                      ),
+                    IconButton(
+                      onPressed: () => exportPdf(globalKey),
+                      icon: const Icon(Icons.share),
+                      color: Colors.green,
+                    ),
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -108,60 +131,34 @@ class _OpenDocumentState extends State<OpenDocument> {
   }
 }
 
-class SignaturePosition extends StatelessWidget {
-  SignaturePosition({
-    Key? key,
-  }) : super(key: key);
-  final positionController = Get.put(PositionController());
-  final imageController = Get.put(ImageController());
+Future<Uint8List?> captureWidget(globalKey) async {
+  try {
+    final RenderRepaintBoundary boundary = globalKey.currentContext.findRenderObject();
+    final ui.Image image = await boundary.toImage();
+    final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    final Uint8List? pngBytes = byteData?.buffer.asUint8List();
+    return pngBytes;
+  } catch (exception) {throw const FormatException(); }
+}
 
-  @override
-  Widget build(BuildContext context) {
-    return Obx(
-      () {
-        var size = positionController.initialScale.value * 100;
-        bool resizingMode = positionController.resizingModeOn.value;
-        return Positioned(
-          left: positionController.xAxis.value,
-          top: positionController.yAxis.value,
-          child: !resizingMode ? Draggable<int>(
-            data: 10,
-            feedback: Container(
-              color: resizingMode ? Colors.green : Colors.red,
-              height: size,
-              width: size,
-            ),
-            onDragUpdate: (details) {
-              var x = details.delta.dx;
-              var y = details.delta.dy;
-              positionController.updatePosition(x, y);
-            },
-            child: GestureDetector(
-              onTap: (){
-                positionController.updateResizingMode();
-              },
-              child: Container(
-                height: size,
-                width: size,
-                color: resizingMode ? Colors.green : Colors.red,
-              ),
-            )
-          ) : GestureDetector(
-            onTap: positionController.updateResizingMode(),
-            onScaleStart: (details) {
-              positionController.updateInitialScale();
-            },
-            onScaleUpdate: (details) {
-              positionController.updateScaleFactor(details.scale);
-            },
-            child: Container(
-              color: resizingMode ? Colors.green : Colors.red,
-              height: size,
-              width: size,
-            ),
-          ),
-        );
-      },
-    );
-  }
+void exportPdf(globalKey) async {
+  final Uint8List imageBytes;
+  imageBytes = (await captureWidget(globalKey))!;
+  final pdf = pw.Document();
+  pdf.addPage(
+      pw.Page(
+          build: (pw.Context context) {
+            return pw.Center(
+              child: pw.Image(pw.MemoryImage(imageBytes)),
+            );
+          }
+      )
+  );
+  Uint8List savedPdf = await pdf.save();
+
+  final output = await getTemporaryDirectory();
+  var filePath = "${output.path}/example.pdf";
+  final file = File(filePath);
+  await file.writeAsBytes(savedPdf);
+  await Share.shareXFiles([XFile(filePath)]);
 }
