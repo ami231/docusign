@@ -41,6 +41,7 @@ dependencies:
   pdf_image_renderer: ^0.7.0
   get: ^4.6.5
   get_storage: ^2.0.3
+  flutter_pdfview: ^1.2.5
   matrix_gesture_detector: 0.2.0-nullsafety.1
   pdf: ^3.9.0
   path_provider: ^2.0.13

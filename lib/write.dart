@@ -1,9 +1,6 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_signaturepad/signaturepad.dart';
 import 'dart:ui' as ui;
-import 'dart:io';
 import 'package:get/get.dart';
 import 'package:signature/doc.dart';
 import 'image_controller.dart';
@@ -50,8 +47,9 @@ class _WriteSignatureState extends State<WriteSignature> {
                     final data =
                     await _signaturePadState.currentState!.toImage(pixelRatio: 3.0);
                     final bytes = await data.toByteData(format: ui.ImageByteFormat.png);
-                    final image = Image.memory(bytes!.buffer.asUint8List());
-                    imageController.updateImage(image);
+                    final imageUint8List = bytes!.buffer.asUint8List();
+                    final image = Image.memory(imageUint8List);
+                    imageController.updateImage(image, imageUint8List);
                     Get.to(const OpenDocument());
                   },
                   child: const Text('SAVE'),

@@ -2,16 +2,16 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/rendering.dart';
-import 'package:pdf_image_renderer/pdf_image_renderer.dart';
 import 'package:get/get.dart';
 import 'image_controller.dart';
 import 'overlayedWidget.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'dart:ui' as ui;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:flutter/services.dart';
+
+import 'pdfWidget.dart';
+import 'matrix_controller.dart';
 
 class OpenDocument extends StatefulWidget {
   const OpenDocument({
@@ -23,40 +23,12 @@ class OpenDocument extends StatefulWidget {
 }
 
 class _OpenDocumentState extends State<OpenDocument> {
-  var pdfImage;
   bool pdfIsPicked = false;
   bool signatureIsAdded = false;
   final imageController = Get.put(ImageController());
-
-  void rendererPdfImage(PlatformFile file) async {
-    String path = file.path!;
-    final pdf = PdfImageRendererPdf(path: path);
-    await pdf.open();
-    await pdf.openPage(pageIndex: 0);
-    final size = await pdf.getPageSize(pageIndex: 0);
-
-    final img = await pdf.renderPage(
-      pageIndex: 0,
-      x: 0,
-      y: 0,
-      width: size.width,
-      height: size.height,
-      scale: 1,
-      // for quality (zooming)
-      background: Colors.white,
-    );
-
-    await pdf.closePage(pageIndex: 0);
-    pdf.close();
-
-    setState(() {
-      pdfImage = img;
-      pdfIsPicked = true;
-    });
-  }
-
+  String filePath = '';
+  final matrixController = Get.put(MatrixController());
   final GlobalKey globalKey = GlobalKey();
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -68,13 +40,13 @@ class _OpenDocumentState extends State<OpenDocument> {
               child: Center(
                 child: pdfIsPicked
                     ? Padding(
-                      padding: const EdgeInsets.only(top: 150.0),
-                      child: RepaintBoundary(
-                        key: globalKey,
-                        child: Stack(
+                        padding: const EdgeInsets.only(top: 150.0),
+                        child: RepaintBoundary(
+                          key: globalKey,
+                          child: Stack(
                             children: [
-                              Image(
-                                image: MemoryImage(pdfImage),
+                              PdfWidget(
+                                filePath: filePath,
                               ),
                               if (signatureIsAdded)
                                 OverlayedWidget(
@@ -84,15 +56,19 @@ class _OpenDocumentState extends State<OpenDocument> {
                                 ),
                             ],
                           ),
-                      ),
-                    )
+                        ),
+                      )
                     : IconButton(
                         onPressed: () async {
                           final FilePickerResult? result =
                               await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
                           if (result == null) return;
                           final file = result.files.first;
-                          rendererPdfImage(file);
+                          setState(() {
+                            filePath = file.path!;
+                            pdfIsPicked = true;
+                          });
+                          //rendererPdfImage(file);
                         },
                         icon: const Icon(
                           Icons.add_circle,
@@ -117,7 +93,7 @@ class _OpenDocumentState extends State<OpenDocument> {
                         child: const Text('insert signature'),
                       ),
                     IconButton(
-                      onPressed: () => exportPdf(globalKey),
+                      onPressed: () => exportPdf(filePath),
                       icon: const Icon(Icons.share),
                       color: Colors.green,
                     ),
@@ -131,29 +107,39 @@ class _OpenDocumentState extends State<OpenDocument> {
   }
 }
 
-Future<Uint8List?> captureWidget(globalKey) async {
-  try {
-    final RenderRepaintBoundary boundary = globalKey.currentContext.findRenderObject();
-    final ui.Image image = await boundary.toImage();
-    final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-    final Uint8List? pngBytes = byteData?.buffer.asUint8List();
-    return pngBytes;
-  } catch (exception) {throw const FormatException(); }
-}
 
-void exportPdf(globalKey) async {
-  final Uint8List imageBytes;
-  imageBytes = (await captureWidget(globalKey))!;
+void exportPdf(path) async {
+  final matrixController = Get.put(MatrixController());
+  final imageController = Get.put(ImageController());
+
+  // final template = File(path).readAsBytesSync();
+  // final pdf = pw.Document.load(PdfDocumentParserBase(template));
+
   final pdf = pw.Document();
-  pdf.addPage(
-      pw.Page(
-          build: (pw.Context context) {
-            return pw.Center(
-              child: pw.Image(pw.MemoryImage(imageBytes)),
-            );
-          }
-      )
+  pdf.addPage(pw.Page(build: (pw.Context context){return pw.Container();}));
+
+
+  pdf.editPage(
+    0,
+    pw.Page(
+      build: (pw.Context context) {
+        return pw.Stack(
+          children: [
+            pw.Transform(
+              transform: matrixController.currentPosition.value,
+              child: pw.Align(
+                alignment: pw.Alignment.center,
+                child: pw.Container(
+                  child: pw.Image(pw.MemoryImage(imageController.imageBytes!))
+                )
+              ),
+            ),
+          ],
+        );
+      },
+    ),
   );
+
   Uint8List savedPdf = await pdf.save();
 
   final output = await getTemporaryDirectory();

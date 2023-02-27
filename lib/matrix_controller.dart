@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-class MatrixContorller extends GetxController {
-  List<int> matrix = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0].obs;
-  matrixUpdate(m){
+class MatrixController extends GetxController {
+  final Rx<Matrix4> currentPosition = Matrix4.identity().obs;
 
+  matrixUpdate(m){
+    currentPosition(m);
   }
 }
